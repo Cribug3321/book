@@ -5,13 +5,20 @@
       <div class="search-box">
         <el-input
             v-model="searchKeyword"
-            placeholder="输入书名或作者搜索..."
+            placeholder="请输入关键字搜索..."
             clearable
             @clear="handleSearch"
             @keyup.enter="handleSearch"
-            style="width: 300px; margin-right: 10px;"
+            style="width: 450px; margin-right: 10px;"
         >
-          <template #prefix>🔍</template>
+          <template #prepend>
+            <el-select v-model="searchType" style="width: 100px;">
+              <el-option label="全部" value="all" />
+              <el-option label="ISBN" value="isbn" />
+              <el-option label="书名" value="title" />
+              <el-option label="作者" value="author" />
+            </el-select>
+          </template>
         </el-input>
         <el-button type="primary" @click="handleSearch">搜索</el-button>
       </div>
@@ -73,8 +80,10 @@ import {ElMessage} from 'element-plus'
 const books = ref([])
 const totalBooks = ref(0)
 const loading = ref(false)
-const currentPage = ref(1)          // 新增：记录当前页码
-const searchKeyword = ref('')       // 新增：记录搜索关键字
+const currentPage = ref(1)          // 记录当前页码
+const searchKeyword = ref('')       // 记录搜索关键字
+// 新增：记录搜索类型，默认是全部(all)
+const searchType = ref('all')
 
 // 注入 App.vue 的登录弹窗方法
 const openAuthDialog = inject('openAuthDialog')
@@ -86,7 +95,7 @@ const fetchBooks = async (page = 1) => {
   currentPage.value = page
   const userId = localStorage.getItem('user_id') || '' // 取出当前登录的 userId
   try {
-    const response = await axios.get(`http://127.0.0.1:8000/api/books/?page=${page}&search=${searchKeyword.value}&user_id=${userId}`)
+    const response = await axios.get(`http://127.0.0.1:8000/api/books/?page=${page}&search=${searchKeyword.value}&search_type=${searchType.value}&user_id=${userId}`)
 
     // 如果 book.user_rating 有值，就除以 2 变成星星；否则给 0
     books.value = response.data.results.map(book => ({
