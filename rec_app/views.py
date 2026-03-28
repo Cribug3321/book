@@ -53,8 +53,8 @@ class BookListView(generics.ListAPIView):
         # 2. 权限与排序隔离逻辑
         if scope == 'admin':
             # 【管理员视角】：不过滤评价数，展示全库所有书籍。
-            # 默认按 isbn 倒序（通常是最新添加的书排在前面），方便管理
-            queryset = queryset.order_by('-isbn')
+            # 修改为按添加时间倒序（最近添加的优先展示）
+            queryset = queryset.order_by('-created_at', '-isbn')
         else:
             # 【普通用户视角】：如果没有搜索关键字，默认只推荐评价数大于5的好书
             if not search_keyword:
@@ -245,6 +245,39 @@ class AdminBookView(APIView):
             return Response({"message": f"书籍 {isbn} 已成功删除"}, status=status.HTTP_200_OK)
         except Book.DoesNotExist:
             return Response({"error": "书籍不存在"}, status=status.HTTP_404_NOT_FOUND)
+
+    def put(self, request):
+        """修改书籍信息"""
+        operator_id = request.data.get('operator_id')
+        if not check_is_admin(operator_id):
+            return Response({"error": "权限拒绝：您不是管理员"}, status=status.HTTP_403_FORBIDDEN)
+
+        isbn = request.data.get('isbn')
+        if not isbn:
+            return Response({"error": "缺少必要参数 isbn"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            book = Book.objects.get(isbn=isbn)
+
+            # 更新允许修改的字段（ISBN 作为主键不可更改）
+            if 'title' in request.data:
+                book.title = request.data.get('title')
+            if 'author' in request.data:
+                book.author = request.data.get('author')
+            if 'year' in request.data:
+                try:
+                    book.year = int(request.data.get('year'))
+                except (ValueError, TypeError):
+                    pass  # 如果转换年份失败则忽略
+            if 'publisher' in request.data:
+                book.publisher = request.data.get('publisher')
+
+            book.save()
+            serializer = BookSerializer(book)
+            return Response({"message": "书籍信息修改成功", "data": serializer.data}, status=status.HTTP_200_OK)
+
+        except Book.DoesNotExist:
+            return Response({"error": "未找到该书籍"}, status=status.HTTP_404_NOT_FOUND)
 
 
 class AdminUserView(APIView):

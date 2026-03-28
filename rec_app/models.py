@@ -12,6 +12,9 @@ class Book(models.Model):
     avg_rating = models.FloatField(default=0.0)
     num_ratings = models.IntegerField(default=0)
 
+    # === 新增字段：记录添加时间 ===
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
+
     def __str__(self):
         return self.title
 
