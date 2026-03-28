@@ -143,7 +143,7 @@
             </el-table>
 
             <div style="margin-top: 15px; text-align: right;">
-              <el-button @click="fetchUsers" size="small" icon="el-icon-refresh">刷新列表</el-button>
+              <el-button @click="fetchUsers" size="small">🔄 刷新列表</el-button>
             </div>
           </div>
         </div>
