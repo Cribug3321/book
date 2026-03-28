@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="DataSourceManagerImpl" format="xml" multifile-model="true">
+    <data-source source="LOCAL" name="Aurora MySQL (AWS Wrapper)" uuid="e46d8e16-6e77-4810-b988-781c352b97d6">
+      <driver-ref>mysql_aurora.aws_wrapper</driver-ref>
+      <synchronize>true</synchronize>
+      <jdbc-driver>software.amazon.jdbc.Driver</jdbc-driver>
+      <jdbc-url>navicat://conn.mysql@local/6003FE3ef7d05d43?Conn.Host=localhost&amp;Conn.Name=localhost_3306&amp;Conn.Port=3306&amp;Conn.UseHTTP=false&amp;Conn.UseSSH=false&amp;Conn.UseSSL=false&amp;Conn.UseSocketFile=false&amp;Conn.Username=root</jdbc-url>
+      <working-dir>$ProjectFileDir$</working-dir>
+    </data-source>
+  </component>
+</project>
