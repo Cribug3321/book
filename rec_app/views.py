@@ -1,12 +1,13 @@
-from rest_framework import generics, status
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.pagination import PageNumberPagination
-from rest_framework.decorators import api_view
 from django.db.models import Avg, Count, Case, When, Q, OuterRef, Subquery, Max
+from rest_framework import generics, status
+from rest_framework.decorators import api_view
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
 from .models import Book, UserProfile, Rating
-from .serializers import BookSerializer
 from .recommender import recommender
+from .serializers import BookSerializer
 
 
 # ==========================================
@@ -30,8 +31,8 @@ class BookListView(generics.ListAPIView):
 
         # 获取前端传来的参数
         search_keyword = self.request.query_params.get('search', '').strip()
-        search_type = self.request.query_params.get('search_type', 'all')  # 新增：搜索字段选项
-        scope = self.request.query_params.get('scope', 'user')  # 新增：场景（admin或user）
+        search_type = self.request.query_params.get('search_type', 'all')
+        scope = self.request.query_params.get('scope', 'user')
         user_id = self.request.query_params.get('user_id')
 
         # 1. 搜索过滤逻辑
@@ -52,8 +53,7 @@ class BookListView(generics.ListAPIView):
 
         # 2. 权限与排序隔离逻辑
         if scope == 'admin':
-            # 【管理员视角】：不过滤评价数，展示全库所有书籍。
-            # 修改为按添加时间倒序（最近添加的优先展示）
+            # 【管理员视角】：不过滤评价数，展示全库所有书籍。按添加时间倒序
             queryset = queryset.order_by('-created_at', '-isbn')
         else:
             # 【普通用户视角】：如果没有搜索关键字，默认只推荐评价数大于5的好书
@@ -165,7 +165,7 @@ def login_user(request):
             'message': '登录成功',
             'user_id': user.user_id,
             'username': user.username or f"老读者_{user.user_id}",
-            'is_admin': user.is_admin  # 返回管理员状态
+            'is_admin': user.is_admin
         })
     return Response({'error': '账号或密码错误'}, status=400)
 
@@ -259,7 +259,7 @@ class AdminBookView(APIView):
         try:
             book = Book.objects.get(isbn=isbn)
 
-            # 更新允许修改的字段（ISBN 作为主键不可更改）
+            # 更新允许修改的字段
             if 'title' in request.data:
                 book.title = request.data.get('title')
             if 'author' in request.data:
@@ -268,7 +268,7 @@ class AdminBookView(APIView):
                 try:
                     book.year = int(request.data.get('year'))
                 except (ValueError, TypeError):
-                    pass  # 如果转换年份失败则忽略
+                    pass
             if 'publisher' in request.data:
                 book.publisher = request.data.get('publisher')
 
@@ -282,31 +282,92 @@ class AdminBookView(APIView):
 
 class AdminUserView(APIView):
     def get(self, request):
-        """获取所有新注册的用户列表（排除原始训练集的老用户）"""
+        """获取所有新注册的用户列表，并返回密码字段"""
         operator_id = request.query_params.get('operator_id')
         if not check_is_admin(operator_id):
             return Response({"error": "权限拒绝：您不是管理员"}, status=status.HTTP_403_FORBIDDEN)
 
-        # 核心过滤逻辑：
-        # 1. username__isnull=False 且不为空 -> 说明是系统里新注册的用户，过滤掉了原始 csv 导入的老用户
-        # 2. exclude(user_id=operator_id) -> 把当前管理员自己隐藏掉，防止误删自己
         users = UserProfile.objects.filter(
             username__isnull=False
         ).exclude(
             username=''
         ).exclude(
             user_id=operator_id
-        ).order_by('-user_id')  # 按注册时间倒序排
+        ).order_by('-user_id')
 
         user_data = []
         for u in users:
             user_data.append({
                 "user_id": u.user_id,
                 "username": u.username,
-                "is_admin": u.is_admin
+                "is_admin": u.is_admin,
+                "password": u.password  # 新增：返回密码给前端
             })
 
         return Response({"status": "success", "data": user_data}, status=status.HTTP_200_OK)
+
+    def put(self, request):
+        """修改用户信息（支持 ID 和密码修改，保持用户名不变）"""
+        operator_id = request.data.get('operator_id')
+        if not check_is_admin(operator_id):
+            return Response({"error": "权限拒绝：您不是管理员"}, status=status.HTTP_403_FORBIDDEN)
+
+        old_user_id = request.data.get('old_user_id')
+        new_user_id = request.data.get('user_id')
+        new_password = request.data.get('password')
+
+        if not old_user_id or not new_user_id:
+            return Response({"error": "缺少必要参数"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = UserProfile.objects.get(user_id=old_user_id)
+
+            # 防止修改管理员自身或其他管理员信息
+            if user.is_admin:
+                return Response({"error": "不允许修改管理员信息"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # 如果 ID 发生变化，需要进行 ID 迁移策略
+            if int(old_user_id) != int(new_user_id):
+                if UserProfile.objects.filter(user_id=new_user_id).exists():
+                    return Response({"error": "该用户ID已被占用，请换一个唯一的ID"}, status=status.HTTP_400_BAD_REQUEST)
+
+                # ================= 核心修复 =================
+                # 记录原来的用户名
+                original_username = user.username
+                # 给老用户临时改个名字，把原始用户名在数据库中的唯一坑位腾出来
+                if original_username:
+                    user.username = f"{original_username}_temp_{old_user_id}"
+                    user.save(update_fields=['username'])
+                # ============================================
+
+                # 1. 创建具有新 ID 的临时用户对象 (此时 original_username 已经可用)
+                new_user = UserProfile.objects.create(
+                    user_id=new_user_id,
+                    username=original_username,
+                    password=new_password if new_password is not None else user.password,
+                    is_admin=user.is_admin,
+                    age=user.age
+                )
+
+                # 2. 迁移所有关联的评价数据（外键更新）
+                Rating.objects.filter(user=user).update(user=new_user)
+
+                # 3. 删除旧 ID 用户
+                user.delete()
+                msg = f"用户修改成功！ID 已从 {old_user_id} 变更为 {new_user_id}"
+            else:
+                # 仅修改密码（ID没变）
+                if new_password is not None:
+                    user.password = new_password
+                    user.save()
+                msg = "用户密码修改成功！"
+
+            return Response({"message": msg}, status=status.HTTP_200_OK)
+
+        except UserProfile.DoesNotExist:
+            return Response({"error": "未找到指定用户"}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": f"修改失败: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def delete(self, request):
         """删除用户及其所有关联数据，并同步更新图书的冗余评分字段"""
@@ -321,15 +382,9 @@ class AdminUserView(APIView):
         try:
             user = UserProfile.objects.get(user_id=user_id)
 
-            # ================= 核心修复：处理数据一致性 =================
-            # 1. 在删除用户之前，先查出这个用户评价过的所有图书，存进内存列表
-            # （如果不提前存列表，用户一删，就查不到他评价过哪些书了）
             affected_books = list(Book.objects.filter(rating__user=user))
-
-            # 2. 执行删除操作（数据库会自动清理底层的 Rating 记录）
             user.delete()
 
-            # 3. 重新计算这些受影响图书的最新分数
             books_to_update = []
             for book in affected_books:
                 stats = Rating.objects.filter(book=book).aggregate(
@@ -340,10 +395,8 @@ class AdminUserView(APIView):
                 book.num_ratings = stats['count'] or 0
                 books_to_update.append(book)
 
-            # 4. 批量执行更新，避免 for 循环里疯狂请求数据库导致卡顿
             if books_to_update:
                 Book.objects.bulk_update(books_to_update, ['avg_rating', 'num_ratings'])
-            # ==========================================================
 
             return Response({
                 "message": f"用户 {user.username} (ID:{user_id}) 已销毁。已同步刷新了受影响的 {len(books_to_update)} 本图书评分！"
@@ -352,5 +405,4 @@ class AdminUserView(APIView):
         except UserProfile.DoesNotExist:
             return Response({"error": "用户不存在"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
-            # 捕获其他意外错误
             return Response({"error": f"删除过程中发生错误: {str(e)}"}, status=500)

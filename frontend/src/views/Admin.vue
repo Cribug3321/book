@@ -128,6 +128,9 @@
                       empty-text="暂无用户">
               <el-table-column prop="user_id" label="用户 ID" width="120" align="center"/>
               <el-table-column prop="username" label="用户名"/>
+
+              <el-table-column prop="password" label="用户密码" width="150" align="center"/>
+
               <el-table-column label="身份角色" width="150" align="center">
                 <template #default="scope">
                   <el-tag :type="scope.row.is_admin ? 'danger' : 'success'">
@@ -135,9 +138,11 @@
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="危险操作" width="150" align="center">
+
+              <el-table-column label="操作" width="200" align="center">
                 <template #default="scope">
-                  <el-button type="danger" size="small" @click="handleDeleteUser(scope.row)" plain>销毁用户</el-button>
+                  <el-button type="primary" size="small" @click="openEditUserDialog(scope.row)" :disabled="scope.row.is_admin" plain>编辑</el-button>
+                  <el-button type="danger" size="small" @click="handleDeleteUser(scope.row)" plain>销毁</el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -145,6 +150,27 @@
             <div style="margin-top: 15px; text-align: right;">
               <el-button @click="fetchUsers" size="small">🔄 刷新列表</el-button>
             </div>
+
+            <el-dialog v-model="editUserDialogVisible" title="修改普通用户信息" width="400px">
+              <el-form :model="editUserForm" label-width="80px">
+                <el-form-item label="用户名">
+                  <el-input v-model="editUserForm.username" disabled placeholder="用户名不可修改" />
+                </el-form-item>
+                <el-form-item label="用户ID">
+                  <el-input v-model="editUserForm.user_id" type="number" placeholder="修改确保ID唯一" />
+                </el-form-item>
+                <el-form-item label="密码">
+                  <el-input v-model="editUserForm.password" placeholder="请输入新密码" />
+                </el-form-item>
+              </el-form>
+              <template #footer>
+                <span class="dialog-footer">
+                  <el-button @click="editUserDialogVisible = false">取消</el-button>
+                  <el-button type="primary" @click="submitEditUser" :loading="savingUserEdit">确认修改</el-button>
+                </span>
+              </template>
+            </el-dialog>
+
           </div>
         </div>
 
@@ -182,6 +208,11 @@ const editBookForm = ref({isbn: '', title: '', author: '', year: '', publisher: 
 const userList = ref([])
 const loadingUsers = ref(false)
 
+// 新增：编辑用户的状态
+const editUserDialogVisible = ref(false)
+const savingUserEdit = ref(false)
+const editUserForm = ref({ old_user_id: '', user_id: '', username: '', password: '' })
+
 const API_BASE = 'http://127.0.0.1:8000/api'
 
 onMounted(() => {
@@ -203,7 +234,6 @@ const handleMenuSelect = (index) => {
 const searchBooks = async () => {
   loadingBooks.value = true
   try {
-    // 核心修改：请求时带上 search_type 和 scope=admin
     const res = await axios.get(`${API_BASE}/books/?search=${searchKeyword.value}&search_type=${searchType.value}&scope=admin`)
     bookList.value = res.data.results || []
   } catch (error) {
@@ -255,6 +285,37 @@ const handleDeleteBook = (row) => {
   })
 }
 
+const openEditDialog = (row) => {
+  editBookForm.value = {...row}
+  editDialogVisible.value = true
+}
+
+const submitEditBook = async () => {
+  if (!editBookForm.value.title) return ElMessage.warning('书名不能为空')
+
+  savingEdit.value = true
+  try {
+    const payload = {
+      operator_id: operatorId.value,
+      isbn: editBookForm.value.isbn,
+      title: editBookForm.value.title,
+      author: editBookForm.value.author,
+      year: editBookForm.value.year,
+      publisher: editBookForm.value.publisher
+    }
+
+    const res = await axios.put(`${API_BASE}/admin/books/`, payload)
+    ElMessage.success(res.data.message || '修改成功')
+
+    editDialogVisible.value = false
+    searchBooks()
+  } catch (error) {
+    ElMessage.error(error.response?.data?.error || '修改失败')
+  } finally {
+    savingEdit.value = false
+  }
+}
+
 // === 用户相关逻辑 ===
 const fetchUsers = async () => {
   loadingUsers.value = true
@@ -285,39 +346,39 @@ const handleDeleteUser = (row) => {
   })
 }
 
-// ==============================
-// === 新增：处理编辑书籍的逻辑 ===
-// ==============================
-const openEditDialog = (row) => {
-  // 浅拷贝当前行的数据到表单里，避免未保存就修改了表格内容
-  editBookForm.value = {...row}
-  editDialogVisible.value = true
+// 新增：处理编辑用户的逻辑
+const openEditUserDialog = (row) => {
+  editUserForm.value = {
+    old_user_id: row.user_id, // 记录原ID
+    user_id: row.user_id,
+    username: row.username,
+    password: row.password // 将原密码填入输入框
+  }
+  editUserDialogVisible.value = true
 }
 
-const submitEditBook = async () => {
-  if (!editBookForm.value.title) return ElMessage.warning('书名不能为空')
+const submitEditUser = async () => {
+  if (!editUserForm.value.user_id) return ElMessage.warning('用户ID不能为空')
+  if (!editUserForm.value.password) return ElMessage.warning('密码不能为空')
 
-  savingEdit.value = true
+  savingUserEdit.value = true
   try {
     const payload = {
       operator_id: operatorId.value,
-      isbn: editBookForm.value.isbn,
-      title: editBookForm.value.title,
-      author: editBookForm.value.author,
-      year: editBookForm.value.year,
-      publisher: editBookForm.value.publisher
+      old_user_id: editUserForm.value.old_user_id,
+      user_id: parseInt(editUserForm.value.user_id),
+      password: editUserForm.value.password
     }
 
-    // 调用我们在后端新写的 PUT 接口
-    const res = await axios.put(`${API_BASE}/admin/books/`, payload)
+    const res = await axios.put(`${API_BASE}/admin/users/`, payload)
     ElMessage.success(res.data.message || '修改成功')
 
-    editDialogVisible.value = false // 关闭弹窗
-    searchBooks() // 重新刷新表格数据，获取最新内容
+    editUserDialogVisible.value = false
+    fetchUsers() // 刷新列表以同步最新数据
   } catch (error) {
     ElMessage.error(error.response?.data?.error || '修改失败')
   } finally {
-    savingEdit.value = false
+    savingUserEdit.value = false
   }
 }
 </script>
